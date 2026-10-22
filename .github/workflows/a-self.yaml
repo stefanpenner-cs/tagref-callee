@@ -1,0 +1,6 @@
+name: a-self
+on:
+  workflow_call:
+jobs:
+  a:
+    uses: $/.github/workflows/b.yaml
