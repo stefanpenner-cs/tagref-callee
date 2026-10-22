@@ -1,25 +1,25 @@
-# `$/` fails on annotated tags
+# Annotated tag + `$/` reusable workflow ref gives `startup_failure`
 
-Same commit. Same code. One call works. One call fails.
+Same commit. Same code. One ref works. One ref fails.
 
 ```yaml
-uses: stefanpenner-cs/tagref-callee/.github/workflows/a-self.yaml@lightweight   # ✅ works
-uses: stefanpenner-cs/tagref-callee/.github/workflows/a-self.yaml@annotated     # ❌ startup_failure
+uses: stefanpenner-cs/tagref-callee/.github/workflows/a-self.yaml@light-a  # ✅ works
+uses: stefanpenner-cs/tagref-callee/.github/workflows/a-self.yaml@ann-a    # ❌ startup_failure
 ```
 
-Both tags point to the same commit. `a-self.yaml` calls `b.yaml` with `$/`.
+Both tags point to commit `9c4154b`. `a-self.yaml` calls `b.yaml` with `$/`.
 
-## The two tags
+## The two tag types
 
 ```text
-lightweight ───────────────────────────> commit d25c374
-annotated ──> tag object ──────────────> commit d25c374
+light-a ───────────────────────────> commit 9c4154b
+ann-a ──> tag object ──────────────> commit 9c4154b
 ```
 
-- A **lightweight tag** is a name for a commit.
-- An **annotated tag** is a name for a tag object. The tag object points to the commit.
+- A **lightweight tag** names a commit.
+- An **annotated tag** names a tag object. The tag object points to the commit.
 
-## What fails
+## Results
 
 ```text
 caller
@@ -27,52 +27,61 @@ caller
        └─ uses $/.github/workflows/b.yaml
 ```
 
-| `<ref>` | Result | Run |
-|---|---|---|
-| `lightweight` | ✅ success | [39832716859](https://github.com/stefanpenner-cs/tagref-caller/actions/runs/39832716859) |
-| `main` (branch) | ✅ success | [39832732378](https://github.com/stefanpenner-cs/tagref-caller/actions/runs/39832732378) |
-| `annotated` | ❌ **startup_failure**, 0 jobs, no error text | [39832724653](https://github.com/stefanpenner-cs/tagref-caller/actions/runs/39832724653) |
+n = number of runs. All runs are `workflow_dispatch` in a public repo.
 
-## Control: remove `$/`
+| Caller ref | Tag type | Nested `uses:` | n | Result |
+|---|---|---|---|---|
+| `ann-a` | annotated | `$/` | 3 | ❌ startup_failure |
+| `ann-b` | annotated | `$/` | 1 | ❌ startup_failure |
+| `lightweight-named-ann` | annotated (lightweight-looking name) | `$/` | 1 | ❌ startup_failure |
+| `light-a` | lightweight | `$/` | 3 | ✅ success |
+| `light-b` | lightweight | `$/` | 1 | ✅ success |
+| `annotated-named-lw` | lightweight (annotated-looking name) | `$/` | 1 | ✅ success |
+| `ann-a` | annotated | full path to `@ann-a` (`a-full-ann`) | 1 | ✅ success |
+| `light-a` | lightweight | full path to `@light-a` (`a-full-light`) | 1 | ✅ success |
+| `ann-a` | annotated | full path to `@light-a` (`a-full-light`) | 1 | ✅ success |
 
-`a-full.yaml` calls `b.yaml` with a full path. Nothing else changes.
+- Tag type decides the result. The tag name does not.
+- The full-path controls use the same tag type and pass. So `$/` is the trigger.
+- A failed run has 0 jobs and no error text.
 
-| `<ref>` | Result | Run |
-|---|---|---|
-| `lightweight` | ✅ success | [39832739244](https://github.com/stefanpenner-cs/tagref-caller/actions/runs/39832739244) |
-| `annotated` | ✅ success | [39832746109](https://github.com/stefanpenner-cs/tagref-caller/actions/runs/39832746109) |
-
-The annotated tag works without `$/`. So `$/` is the trigger.
+Every case uses commit `9c4154b`. Run IDs are in
+[tagref-caller](https://github.com/stefanpenner-cs/tagref-caller/actions).
 
 ## Why it matters
 
-- Floating tags such as `v1` are annotated (`git tag -fa`).
-- Version tags such as `v1.3.358` are lightweight.
-- `workflow.yaml@v1.3.358` works. `workflow.yaml@v1` fails. The commit is the same.
+- The incident: `v1` is an annotated tag. `v1.3.358` is a lightweight tag. Both name one commit.
+- `@v1.3.358` worked. `@v1` failed.
 - Tests that call by branch do not catch this.
 
 ## Reproduce
 
 1. Open [tagref-caller](https://github.com/stefanpenner-cs/tagref-caller/actions).
-2. Run `light-self`, `annotated-self` and `branch-self` with `workflow_dispatch`.
-3. Compare. Only `annotated-self` fails.
-
-To rebuild from scratch:
+2. Run the `m*` workflows with `workflow_dispatch`.
+3. Check each result:
 
 ```bash
-git tag lightweight
-git tag -a annotated -m annotated
-git push origin main lightweight annotated
+gh run list -R stefanpenner-cs/tagref-caller --json workflowName,conclusion
+```
+
+Rebuild the tags from scratch:
+
+```bash
+git tag light-a
+git tag -a ann-a -m ann-a
+git push origin main light-a ann-a
 ```
 
 ## Known and unknown
 
-- **Known:** the tag type alone changes the result. `$/` is the trigger.
-- **Unknown:** why. The tag object SHA may be used where a commit SHA is needed. This is a guess.
+- **Known:** on this commit, annotated tag + `$/` fails. Lightweight tag + `$/` passes.
+- **Unknown:** the cause. GitHub shows no error text.
+- **Unknown:** public vs internal repos, `push` and PR events, deeper chains, force-moved tags.
+- **Not tested:** the claim in the revert PR about how `$/` resolves.
 
 ## Workaround
 
-Use lightweight floating tags, or use a full `owner/repo/path@ref` in nested `uses:`.
+Not proven. A full `owner/repo/path@ref` in nested `uses:` passed in the controls above.
 
 ## Files
 
@@ -80,4 +89,4 @@ Use lightweight floating tags, or use a full `owner/repo/path@ref` in nested `us
 |---|---|
 | `.github/workflows/b.yaml` | Leaf workflow. Prints a line. |
 | `.github/workflows/a-self.yaml` | Calls `b.yaml` with `$/`. |
-| `.github/workflows/a-full.yaml` | Control. Calls `b.yaml` by full path at `@main`. |
+| `.github/workflows/a-full*.yaml` | Controls. Call `b.yaml` by full path. |
