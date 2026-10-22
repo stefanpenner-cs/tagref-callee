@@ -1,0 +1,6 @@
+name: a-full-ann
+on:
+  workflow_call:
+jobs:
+  a:
+    uses: stefanpenner-cs/tagref-callee/.github/workflows/b.yaml@ann-a
